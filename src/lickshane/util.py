@@ -1,5 +1,8 @@
+import datetime
+import numpy as np
+from astropy.io import fits as pyfits
+
 def sortbyJD(lista):
-    from astropy.io import fits as pyfits
     from numpy import array
 
     JDlist = []
@@ -34,7 +37,6 @@ def ReadAscii2(ascifile):
 #########################################################################
 def readspectrum(img):
     from numpy import array
-    import pyfits
     import string
 
     fl = ''
@@ -85,7 +87,6 @@ def readspectrum(img):
 def readlist(listfile):
     from lickshane.util import correctcard
     import string, os, sys, re, glob
-    from pyfits import open as opn
 
     if '*' in listfile:
         imglist = glob.glob(listfile)
@@ -93,7 +94,7 @@ def readlist(listfile):
         imglist = string.split(listfile, sep=',')
     else:
         try:
-            hdulist = opn(listfile)
+            hdulist = pyfits.open(listfile)
         except:
             hdulist = []
         if hdulist:
@@ -109,12 +110,12 @@ def readlist(listfile):
                     if not ff == '\n' and ff[0] != '#':
                         ff = re.sub('\n', '', ff)
                         try:
-                            hdulist = opn(ff)
+                            hdulist = pyfits.open(ff)
                             imglist.append(ff)
                         except:
                             try:
                                 correctcard(ff)
-                                hdulist = opn(ff)
+                                hdulist = pyfits.open(ff)
                                 imglist.append(ff)
                             except:
                                 pass
@@ -156,10 +157,8 @@ def delete(listfile):
 
 ###############################################################
 def readhdr(img):
-    from pyfits import open as popen
-
     try:
-        hdr = popen(img)[0].header
+        hdr = pyfits.open(img)[0].header
     except:
         from lickshane.util import correctcard
 
@@ -169,49 +168,36 @@ def readhdr(img):
             import sys
 
             sys.exit('image ' + str(img) + ' is corrupted, delete it and start again')
-        hdr = popen(img)[0].header
+        hdr = pyfits.open(img)[0].header
     return hdr
 
 
 def readkey3(hdr, keyword):
     import re, string, sys
-    import pyfits
-
-    if pyfits.__version__:
-        if int(re.sub('\.', '', str(pyfits.__version__))[:2]) <= 30:
-            aa = 'HIERARCH '
-        else:
-            aa = ''
-    else:
-        aa = ''
     try:
-        _instrume = hdr.get('INSTRUME').lower()
+        _instrume = hdr.get('VERSION').lower()
     except:
         _instrume = 'none'
-    if _instrume in ['en05', 'en06']:
-        if not hdr.get('HDRVER'):
-            useful_keys = {'object': 'OBJECT',
-                           'date-obs': 'DATE-OBS',
+    if _instrume in ['kastb']:
+        useful_keys = {'object': 'OBJECT',
+                           'date-obs': 'DATE',
                            'ut': 'UTSTART',
                            'obstype': 'OBSTYPE',
                            'RA': 'RA',
                            'DEC': 'DEC',
                            'datamin': -100,
                            'datamax': 60000,
-                           'grpid': 'BLKUID',
                            'exptime': 'EXPTIME',
                            'JD': 'MJD',
                            'MJD': 'MJD',
-                           'lamp': 'LMP_ID',
                            'gain': 'GAIN',
-                           'instrume': 'INSTRUME',
-                           'grism': 'GRISM',
-                           'ron': 'READNOIS',
+                           'grism' : 'GRISM_N',
+                           'ron': 'RON',
                            'airmass': 'AIRMASS',
-                           'slit': 'APERWID',
+                           'slit': 'SLIT_N',
                            'telescop': 'TELESCOP'}
-        else:
-            useful_keys = {'object': 'OBJECT',
+    elif _instrume in ['kastr']:
+        useful_keys = {'object': 'OBJECT',
                            'date-obs': 'DATE-OBS',
                            'ut': 'UTSTART',
                            'obstype': 'OBSTYPE',
@@ -219,17 +205,15 @@ def readkey3(hdr, keyword):
                            'DEC': 'DEC',
                            'datamin': -100,
                            'datamax': 60000,
-                           'grpid': 'BLKUID',
                            'exptime': 'EXPTIME',
-                           'JD': 'MJD-OBS',
-                           'MJD': 'MJD-OBS',
-                           'lamp': 'LMP1ID',
+                           'JD': 'MJD',
+                           'MJD': 'MJD',
                            'gain': 'GAIN',
-                           'instrume': 'INSTRUME',
-                           'grism': 'GRISM',
-                           'ron': 'RDNOISE',
+                           'grism': 'GRATNG_N',
+                           'split' : 'BSLIT_N',
+                           'ron': 'RON',
                            'airmass': 'AIRMASS',
-                           'slit': 'APERWID',
+                           'slit': 'SLIT_N',
                            'telescop': 'TELESCOP'}
     else:
         useful_keys = {'object': 'OBJECT',
@@ -241,14 +225,12 @@ def readkey3(hdr, keyword):
             value = hdr.get(useful_keys[keyword])
             if keyword == 'date-obs':
                 import string, re
-
                 try:
                     value = re.sub('-', '', string.split(value, 'T')[0])
                 except:
                     pass
             elif keyword == 'ut':
                 import string, re
-
                 try:
                     value = string.split(value, 'T')[1]
                 except:
@@ -258,10 +240,17 @@ def readkey3(hdr, keyword):
             elif keyword == 'instrume':
                 value = value.lower()
             elif keyword == 'grism':
-                if not value: value = 'full'
+                if not value: 
+                    value = 'full'
+                else:
+                    value= re.sub('/','_',value)
+
+                if _instrume in ['kastr']:
+                    value = value+'_'+str(int(round(hdr.get('GRTILT_P'), -3)))
+
+
             elif keyword == 'RA':
                 import string, re
-
                 value0 = string.split(value, ':')
                 try:
                     value = ((float(value0[0]) + ((float(value0[1]) + (float(value0[2]) / 60.)) / 60.)) * 15)
@@ -279,6 +268,7 @@ def readkey3(hdr, keyword):
                 except:
                     value = 0
             elif keyword == 'slit':
+                value = re.sub(' ', '', value)
                 value = re.sub('\"', '', re.sub('slit', '', str(value).lower()))
                 value = re.sub('as', '', re.sub('_', '', str(value.lower())))
                 if value == 'UNKNOWN': value = '1.6'
@@ -295,7 +285,6 @@ def readkey3(hdr, keyword):
     else:
         if keyword == 'date-night':
             import datetime
-
             _date = readkey3(hdr, 'DATE-OBS')
             a = (datetime.datetime.strptime(string.split(_date, '.')[0], "20%y-%m-%dT%H:%M:%S") - datetime.timedelta(
                 .0)).isoformat()
@@ -307,6 +296,21 @@ def readkey3(hdr, keyword):
                 value = hdr.get('SITEID')
                 if value in ['ogg']: value = 'ftn'
                 if value in ['coj']: value = 'fts'
+
+        elif keyword == 'lamp':
+            value = hdr.get('LAMPTYPE')
+            if not value:
+                value = hdr.get('LAMPSTA1')
+                if  value not in ['off']:
+                    value = hdr.get('LAMPNAM1')
+                else:
+                    value = hdr.get('LAMPSTAJ')
+                    if value not in ['off']:
+                        value = hdr.get('LAMPNAMJ')
+                    else:
+                        value = hdr.get('SUPBLUE')
+
+
         else:
             try:
                 value = hdr.get(keyword)
@@ -325,11 +329,10 @@ def writeinthelog(text, logfile):
 
 ################################################
 def correctcard(img):
-    from  pyfits import open as popen
     from numpy import asarray
     import re
 
-    hdulist = popen(img)
+    hdulist = pyfits.open(img)
     a = hdulist[0]._verify('fix')
     _header = hdulist[0].header
     for i in range(len(a)):
@@ -343,7 +346,7 @@ def correctcard(img):
             headername.append(j[0])
             newheader.append(j[1])
         hdulist.close()
-        imm = popen(img, mode='update')
+        imm = pyfits.open(img, mode='update')
         _header = imm[0].header
         for i in ww:
             if headername[i]:
@@ -357,13 +360,12 @@ def correctcard(img):
 
 ######################################################################################################
 def updateheader(image, dimension, headerdict):
-    from pyfits import open as opp
-
     try:
-        imm = opp(image, mode='update')
+        imm = pyfits.open(image, mode='update')
         _header = imm[dimension].header
         for i in headerdict.keys():
-            _header.update(i, headerdict[i][0], headerdict[i][1])
+            _header[i] = (headerdict[i][0], headerdict[i][1])
+#            _header.update(i, headerdict[i][0], headerdict[i][1])
         imm.flush()
         imm.close()
     except:
@@ -372,7 +374,7 @@ def updateheader(image, dimension, headerdict):
         print '\nwarning: problem to update header, try to correct header format ....'
         correctcard(image)
         try:
-            imm = opp(image, mode='update')
+            imm = pyfits.open(image, mode='update')
             _header = imm[dimension].header
             for i in headerdict.keys():
                 _header.update(i, headerdict[i][0], headerdict[i][1])
@@ -466,8 +468,8 @@ def searchatmo(img, listatmo):
     from numpy import argmin, abs
 
     hdr = lickshane.util.readhdr(img)
-    JD = readkey3(hdr, 'JD')
-    _instrume = readkey3(hdr, 'TELID')
+    JD = readkey3(hdr, 'MJD')
+    _instrume = readkey3(hdr, 'version')
     grism0 = readkey3(hdr, 'grism')
     if not listatmo:
         directory = lickshane.__path__[0] + '/archive/' + str(_instrume) + '/atmo/' + grism0
@@ -481,7 +483,7 @@ def searchatmo(img, listatmo):
         for atmo in listatmo:
             print atmo
             hdra = readhdr(atmo)
-            JDarc = readkey3(hdra, 'JD')
+            JDarc = readkey3(hdra, 'MJD')
             grism1 = readkey3(hdra, 'grism')
             #           slit1=readkey3(hdra,'slit')
             if grism0 == grism1:
@@ -504,14 +506,12 @@ def searcharc(img, listarc):
     from numpy import argmin, abs
 
     hdr = lickshane.util.readhdr(img)
-    JD = readkey3(hdr, 'JD')
-    _instrume = readkey3(hdr, 'TELID')
-    grism0 = readkey3(hdr, 'grism')
-    slit0 = readkey3(hdr, 'slit')
-    #if slit0=='6.0' and _instrume in ['fts','2m0b']: slit0='2.0'
-    #if slit0=='6.0' and _instrume in ['ftn','2m0a']: slit0='1.6'
+    JD = lickshane.util.readkey3(hdr, 'MJD')
+    _instrume = lickshane.util.readkey3(hdr, 'version')
+    grism0 = lickshane.util.readkey3(hdr, 'grism')
+    slit0 = lickshane.util.readkey3(hdr, 'slit')
     if not listarc:
-        directory = lickshane.__path__[0] + '/archive/' + str(_instrume) + '/arc/' + grism0 + '/' + slit0
+        directory = lickshane.__path__[0] + '/archive/' + str(_instrume) + '/arc/' + grism0
         listarc = glob.glob(directory + '/*fits')
     else:
         directory = ''
@@ -519,17 +519,24 @@ def searcharc(img, listarc):
         arcfile = ''
         distance = []
         goodlist = []
+        distance1 = []
+        goodlist1 = []
         for arc in listarc:
             print arc
-            hdra = readhdr(arc)
-            JDarc = readkey3(hdra, 'JD')
-            grism1 = readkey3(hdra, 'grism')
-            slit1 = readkey3(hdra, 'slit')
+            hdra = lickshane.util.readhdr(arc)
+            JDarc = lickshane.util.readkey3(hdra, 'MJD')
+            grism1 = lickshane.util.readkey3(hdra, 'grism')
+            slit1 = lickshane.util.readkey3(hdra, 'slit')
             if slit0 == slit1 and grism0 == grism1:
                 goodlist.append(arc)
                 distance.append(abs(JD - JDarc))
+            if grism0 == grism1:
+                goodlist1.append(arc)
+                distance1.append(abs(JD - JDarc))
         if len(distance) >= 1:
             arcfile = goodlist[argmin(distance)]
+        elif len(distance1) >= 1:
+            arcfile = goodlist1[argmin(distance1)]
         else:
             arcfile = ''
     else:
@@ -550,7 +557,7 @@ def searchsens(img, listsens):
     elif 'MJD-OBS' in hdr:
         JD = readkey3(hdr, 'MJD-OBS')
 
-    _instrume = readkey3(hdr, 'TELID')
+    _instrume = readkey3(hdr, 'version')
     grism0 = readkey3(hdr, 'grism')
     if not listsens:
         directory = lickshane.__path__[0] + '/archive/' + str(_instrume) + '/sens/' + grism0
@@ -589,8 +596,8 @@ def searchflat(img, listflat):
     from numpy import argmin, abs
 
     hdr = readhdr(img)
-    JD = readkey3(hdr, 'JD')
-    _instrume = readkey3(hdr, 'TELID')
+    JD = readkey3(hdr, 'MJD')
+    _instrume = readkey3(hdr, 'version')
     grism0 = readkey3(hdr, 'grism')
     if not listflat:
         directory = lickshane.__path__[0] + '/archive/' + str(_instrume) + '/flat/' + grism0
@@ -603,7 +610,7 @@ def searchflat(img, listflat):
         goodlist = []
         for flat in listflat:
             hdrf = readhdr(flat)
-            JDflat = readkey3(hdrf, 'JD')
+            JDflat = readkey3(hdrf, 'MJD')
             filter1 = readkey3(hdrf, 'filter')
             if filter0 == filter1:
                 goodlist.append(flat)
@@ -755,14 +762,14 @@ def airmass(img, overwrite=True, _observatory='lasilla'):
 ####################################################################################
 def dvex():
     dv = {}
-    dv['line'] = {'red': 300, 'blu': 1000}
-    dv['std'] = {'_t_order': 12, '_t_niter': 50, '_t_sample': '*', '_t_nlost': 20, '_width': 10, '_radius': 10,
+    dv['line'] = {'600_4310': 1800, '300_7500_3000': 1000, '300_7500_4000': 1000, '300_7500_5000': 1000, '300_7500_6000': 1000}
+    dv['std'] = {'_t_order': 5, '_t_niter': 50, '_t_sample': '*', '_t_nlost': 20, '_width': 10, '_radius': 10,
                  '_weights': 'variance', '_nsum': 30, '_t_step': 10, '_t_nsum': 10, '_lower': -10, '_upper': 10,
                  '_b_sample': '-25:-15,15:25', '_resize': 'no', '_b_naver': -15}
-    dv['obj'] = {'_t_order': 12, '_t_niter': 50, '_t_sample': '*', '_t_nlost': 20, '_width': 10, '_radius': 10,
+    dv['obj'] = {'_t_order': 5, '_t_niter': 50, '_t_sample': '*', '_t_nlost': 20, '_width': 10, '_radius': 10,
                  '_weights': 'variance', '_nsum': 40, '_t_step': 10, '_t_nsum': 10, '_lower': -5, '_upper': 5,
                  '_b_sample': '-25:-15,15:25', '_resize': 'no', '_b_naver': -15}
-    dv['agn'] = {'_t_order': 12, '_t_niter': 50, '_t_sample': '*', '_t_nlost': 20, '_width': 10, '_radius': 10,
+    dv['agn'] = {'_t_order': 5, '_t_niter': 50, '_t_sample': '*', '_t_nlost': 20, '_width': 10, '_radius': 10,
                  '_weights': 'variance', '_nsum': 40, '_t_step': 10, '_t_nsum': 10, '_lower': -13, '_upper': 13,
                  '_b_sample': '-35:-20,20:35', '_resize': 'no', '_b_naver': -15}
 #  -3, -15  
@@ -781,9 +788,8 @@ def phase3header(img):
     import string
     from lickshane.util import readhdr, readkey3
     from numpy import max, min, isfinite
-    from pyfits import open as popen
 
-    img_data = popen(img)[0].data
+    img_data = pyfits.open(img)[0].data
     hdr = readhdr(img)
     hedvec0 = {'DATAMIN': [float(min(img_data[isfinite(img_data)])), ''],
                'DATAMAX': [float(max(img_data[isfinite(img_data)])), ''],
@@ -904,12 +910,10 @@ def StoN(img, ran=50):
 
 ################################################
 def spectraresolution(img):
-    from lickshane import readkey3, readhdr
-
-    hdr = readhdr(img)
-    _instrume = readkey3(hdr, 'instrume')
-    _slit = readkey3(hdr, 'slit')
-    _grism = readkey3(hdr, 'grism')
+    hdr = lickshane.util.readhdr(img)
+    _instrume = lickshane.util.readkey3(hdr, 'version')
+    _slit = lickshane.util.readkey3(hdr, 'slit')
+    _grism = lickshane.util.readkey3(hdr, 'grism')
     risoluzioni = {}
     risoluzioni['lickshane'] = {}
     risoluzioni['lickshane']['blu', '6.0'] = 99
@@ -1172,3 +1176,48 @@ def mjdtoday():
   mjd0  = datetime(1858,11,17)
   mjd = (today - mjd0).days
   return mjd
+
+
+
+#def datetomjd(dh):
+#    import datetime
+#    d = datetime.datetime.strptime(dh,'%Y-%m-%dT%H:%M:%S.%f')
+#    d0 = datetime.datetime(1858, 11, 17, 0, 0, 0)
+#    dt = d - d0
+#    # dt is a timedelta object.
+#    return timedeltatodays(dt)
+
+def mjdtodate(mjd):
+    jd = mjdtojd(mjd)
+    return jdtodate(jd)
+
+def jdtodate(jd):
+    unixtime = (jd - 2440587.5) * 86400. # in seconds
+    return datetime.datetime.utcfromtimestamp(unixtime)
+
+def mjdtojd(mjd):
+    return mjd + 2400000.5
+
+def jdtomjd(jd):
+    return jd - 2400000.5
+
+def timedeltatodays(dt):
+    return dt.days + (dt.seconds + dt.microseconds/1e6)/86400.
+
+def datetomjd(d):
+    d0 = datetime.datetime(1858, 11, 17, 0, 0, 0)
+    dt = d - d0
+    # dt is a timedelta object.
+    return timedeltatodays(dt)
+
+def datetojd(d):
+    return mjdtojd(datetomjd(d))
+
+
+
+def addMJD(img):
+    hdr = pyfits.open(img)[0].header
+    gg = hdr['DATE-OBS']
+    gg = datetime.datetime.strptime(gg,'%Y-%m-%dT%H:%M:%S.%f')
+    kk = datetomjd(gg)
+    updateheader(img, 0, {'MJD':[kk,'MJD star observations']})

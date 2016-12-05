@@ -1,0 +1,510 @@
+#!/usr/bin/env python
+
+import numpy as np
+import pylab as pl
+import string
+import glob
+import re
+import sys
+import os
+import datetime
+import lickshane
+from astropy.io import fits as pyfits
+imglist = glob.glob('r???.fits')+glob.glob('b???.fits')
+import time
+
+def aperture(img):
+    if not os.path.isdir('database/'):
+        os.mkdir('database')
+
+    hdr = pyfits.open(img)[0].header
+    _instr = lickshane.util.readkey3(hdr,'version')
+
+    if _instr in  ['kastb']:
+        xmax = hdr['NAXIS2']
+        xmin = -134
+        img2 = re.sub('.fits', '', img)
+        line = "# Sun 13:10:40 16-Jun-2013\nbegin	aperture " + img2 + " 1 1023  137.0\n" + \
+               "	 image	" + img2 + "\n	aperture	1\n	beam	1\n	center	1023. 137.0\n" + \
+               "	 low	-1022. " + str(xmin) + "\n	high	950. " + str(xmax) + "\n" \
+                                                                                      "	 background\n	 xmin -134.\n" + \
+               "	 xmax 150.\n	 function chebyshev\n		order 1\n		sample *\n" + \
+               "	 naverage -3\n	 niterate 0\n		low_reject 3.\n		high_reject 3.\n" + \
+               "	 grow 0.\n	 axis	2\n	 curve	5\n		2.\n		1.\n" + \
+               "	 1.\n		2047.\n		0\n"
+        f = open('database/ap' + img2, 'w')
+        f.write(line)
+        f.close()
+        time.sleep(1)
+    else:
+        xmax = hdr['NAXIS1']
+        xmin = -134
+        img2 = re.sub('.fits', '', img)
+        line = "# Sun 13:10:40 16-Jun-2013\nbegin	aperture " + img2 + " 1 163 1000.\n" + \
+               "	 image	" + img2 + "\n	aperture	1\n	beam	1\n	center	163 1000.\n" + \
+               "	 low  " + str(xmin) + " -1000\n	high  " + str(xmax) + " 950\n" \
+                                                                                      "	 background\n	 xmin -144.\n" + \
+               "	 xmax 150.\n	 function chebyshev\n		order 1\n		sample *\n" + \
+               "	 naverage -3\n	 niterate 0\n		low_reject 3.\n		high_reject 3.\n" + \
+               "	 grow 0.\n	 axis	1\n	 curve	5\n		2.\n		1.\n" + \
+               "	 1.\n		2047.\n		0\n"
+        f = open('database/ap' + img2, 'w')
+        f.write(line)
+        f.close()
+        time.sleep(1)
+
+
+imglist.sort()
+
+_trimsec = {'kastb':{'600_4310':'[1:2047,25:323]',\
+                     'xxx_xxxx':'[1:2047,25:323]'},\
+            'kastr':{'300_7500_5000':'[102:365,50:2250]',\
+                     '300_7500_3000':'[102:365,700:2700]',\
+                     '300_7500_6000':'[102:365,50:2250]'}}
+
+_overscan = {'kastb':{'600_4310':'[2075:2100,*]',\
+                     'xxx_xxxx':'[2075:2100,*]'},\
+            'kastr':{'300_7500_5000':'[*,20:40]',\
+                     '300_7500_3000':'[*,20:40]',\
+                     '300_7500_6000':'[*,20:40]'}}
+
+
+_section = {'kastb':'line',
+             'kastr':'column'}
+
+_gain0 = {'kastb': 1.2 , 'kastr': 1.9}
+
+_ron0 = {'kastb': 3.7 , 'kastr':  3.7 }
+
+
+biaslist = {}
+flatlist = {}
+objectlist = {}
+arclist={}
+for img in imglist:
+    hdr= pyfits.getheader(img)
+    _lamp = lickshane.util.readkey3(hdr,'lamp')
+    _object = lickshane.util.readkey3(hdr,'object')
+    _obstype = lickshane.util.readkey3(hdr,'OBSTYPE')
+    _grtilt = lickshane.util.readkey3(hdr,'GRTILT_P')
+    _grtilt = int(round(_grtilt, -3))
+    _exptime = lickshane.util.readkey3(hdr,'exptime')
+    _instr = lickshane.util.readkey3(hdr,'version')
+    _grism = lickshane.util.readkey3(hdr,'grism')
+    _slit = re.sub(' ','',lickshane.util.readkey3(hdr,'slit'))
+    print _obstype,_object
+    if _instr not in biaslist:
+        biaslist[_instr]=[]
+    if _instr not in flatlist:
+        flatlist[_instr]={}
+    if _instr not in objectlist:
+        objectlist[_instr]={}
+    if _instr not in arclist:
+        arclist[_instr]={}
+
+    print img, _instr,_object, _grtilt, _lamp
+
+    _type = ''
+    if _exptime==0:
+        _type ='bias'
+    elif _exptime >= 1200:
+        _type ='object'
+    elif _lamp in ['Neon']:
+        _type ='arc'
+    elif _lamp in ['Blue']:
+        _type ='flat'
+    else:
+        if 'flat' in _object:
+            _type ='flat'
+        elif 'arc' in _object:
+            _type ='arc'
+        elif any([c in _object.lower() for c in ['bd28','feige']]):
+            _type ='object'
+
+
+
+    if _type in ['bias']:
+        biaslist[_instr].append(img)
+    elif _type in ['flat']:
+        if (_grism,_slit) not in flatlist[_instr]:
+            flatlist[_instr][(_grism,_slit)]=[]
+        flatlist[_instr][(_grism,_slit)].append(img)
+    elif _type in ['arc']:
+        value = hdr.get('LAMPTYPE')
+        if not value:
+            print _object, _lamp
+            lamptype = raw_input('which Lamp did you use R1, R2, Ne, Ar, HgCd ? ')
+            if lamptype:
+                lickshane.util.updateheader(img, 0, {'LAMPTYPE':[lamptype, ' lamp type ']})
+
+        if (_grism,_slit) not in arclist[_instr]:
+            arclist[_instr][(_grism,_slit)]=[]
+        arclist[_instr][(_grism,_slit)].append(img)
+    elif _type in ['object']:
+        if (_grism,_slit) not in objectlist[_instr]:
+            objectlist[_instr][(_grism,_slit)]=[]
+        objectlist[_instr][(_grism,_slit)].append(img)
+    else:
+        print _object, _grism, _exptime, _lamp
+        _type0 = raw_input('object [o], flat[f], arc[a], bias [b]? ')
+        if _type0 in ['b','B']:
+            biaslist[_instr].append(img)
+        elif _type0 in ['f','F']:
+            if (_grism,_slit) not in flatlist[_instr]:
+                flatlist[_instr][(_grism,_slit)]=[]
+            flatlist[_instr][(_grism,_slit)].append(img)
+        elif _type0 in ['a','A']:
+            if (_grism,_slit) not in arclist[_instr]:
+                arclist[_instr][(_grism,_slit)]=[]
+            arclist[_instr][(_grism,_slit)].append(img)
+        elif _type0 in ['O','o']:
+            if (_grism,_slit) not in objectlist[_instr]:
+                objectlist[_instr][(_grism,_slit)]=[]
+            objectlist[_instr][(_grism,_slit)].append(img)
+
+print objectlist
+print flatlist
+print arclist
+print biaslist
+
+_inter ='yes'
+_listflat=''
+_listbias=''
+_interactive = _inter
+biasmerge={}
+from pyraf import iraf
+#os.environ["PYRAF_BETA_STATUS"] = "1"
+iraf.noao(_doprint=0)
+iraf.imred(_doprint=0)
+iraf.ccdred(_doprint=0)
+iraf.twodspec(_doprint=0)
+iraf.longslit(_doprint=0)
+iraf.specred(_doprint=0)
+
+toforget = ['ccdred.flatcombine', 'ccdred.zerocombine', 'ccdproc', 'specred.apall', 'longslit.identify',
+            'longslit.reidentify',
+            'specred.standard', 'longslit.fitcoords', 'specred.transform', 'specred.response']
+for t in toforget: iraf.unlearn(t)
+
+for tpe in objectlist:
+    print tpe
+    _gain = _gain0[tpe]
+    _rdnoise = _ron0[tpe]
+    for setup in objectlist[tpe].keys():
+############### BIAS   #######3
+        if _listbias:
+            # search bias
+            biasgood=[]
+        elif tpe in biaslist:
+            biasgood = biaslist[tpe]
+        
+        if len(biasgood) != 0:
+            if len(biasgood) > 1:
+                f = open('_obiaslist', 'w')
+                for bimg in biasgood:
+                    f.write(bimg + '\n')
+                f.close()
+                lickshane.util.delete('bias_'+ setup[0] +'.fits')
+                iraf.ccdred.zerocombine('"@_obiaslist"', output='bias_' + setup[0], combine='average', reject='none',
+                                        ccdtype=' ', rdnoise=_rdnoise, gain=_gain, process='no', Stdout=1)
+                biasfile = 'bias_' + setup[0]
+        
+                iraf.ccdproc(biasfile, output= '' , overscan="yes", trim="yes", zerocor='no', flatcor='no',\
+                             darkcor='no', zero='', ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                             biassec=_overscan[tpe][setup[0]], readaxi=_section[tpe], Stdout=1)
+        
+                lickshane.util.delete('_obiaslist')
+            elif len(biasgood) == 1:
+                os.system('cp ' + biasgood[0] + ' bias_' + setup[0])
+                biasfile = 'bias_' + setup[0]
+            biasmerge[setup[0]]=biasfile
+print biasmerge
+#######################################################3
+for tpe in objectlist:
+    for setup in objectlist[tpe]:
+            objectsetup = []
+            arcsetup = []
+            print '\n###### tpe= ', tpe
+            print '\n###### setup= ', setup
+            print '\n###### objects= ', objectlist[tpe][setup], '\n'
+            
+            if tpe == 'kastb':
+                iraf.longslit.dispaxi = 1
+                iraf.specred.dispaxi = 1
+            elif tpe == 'kastr':
+                iraf.longslit.dispaxi = 2
+                iraf.specred.dispaxi = 2
+
+            flatgood=[]
+            if _listflat:
+                flatgood = _listflat  # flat list from reducer
+            elif tpe in flatlist:
+                if setup in flatlist[tpe]:
+                    for ii in flatlist[tpe][setup]:
+                        flatgood.append(ii)
+            flatfile = 'flat' + '_'.join(setup)
+
+            if len(flatgood) != 0:
+                if len(flatgood) > 1:
+                    f = open('_oflatlist', 'w')
+                    for fimg in flatgood:
+                        f.write(fimg + '\n')
+                    f.close()
+                    _order = 10
+                    lickshane.util.delete(flatfile+'.fits')
+                    iraf.ccdred.flatcombine('"@_oflatlist"', output=flatfile , combine='average', reject='none',\
+                                            ccdtype=' ', rdnoise=_rdnoise, gain=_gain, process='no', Stdout=1)
+
+                    lickshane.util.addMJD(flatfile+'.fits')
+                    lickshane.util.updateheader(flatfile+'.fits', 0, {'GAIN':[_gain0[tpe],'gain '],'RON':[_ron0[tpe],'read out noise ']})
+
+                    if tpe in biasmerge:
+                        lickshane.util.delete('t'+flatfile)
+                        iraf.ccdproc(flatfile, output= 't'+flatfile , overscan="yes", trim="yes", zerocor='yes', flatcor='no',\
+                                     darkcor='no', zero=biasmerge[tpe], ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                                     biassec=_overscan[tpe][setup[0]], readaxi=_section[tpe], Stdout=1)
+                    else:
+                        lickshane.util.delete('t'+flatfile)
+                        iraf.ccdproc(flatfile, output= 't'+flatfile , overscan="yes", trim="yes", zerocor='no', flatcor='no',\
+                                     darkcor='no', zero='', ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                                     biassec=_overscan[tpe][setup[0]], readaxi=_section[tpe], Stdout=1)
+
+                    aperture('t'+flatfile+'.fits')
+                    lickshane.util.delete('n'+flatfile)
+                    iraf.specred.apflatten('t'+flatfile, output='n' + flatfile, interac=_inter, find='no',\
+                                           recenter='no', resize='no', edit='no', trace='no', fittrac='no',\
+                                           fitspec='yes', flatten='yes', aperture='', pfit='fit2d', clean='no',\
+                                           function='legendre', order=_order, sample='*', mode='ql')
+                    lickshane.util.delete('_oflatlist')
+                else:
+                    flatfile = ''
+            else:
+                flatfile = ''
+
+            for img in objectlist[tpe][setup]:
+                hdr= pyfits.getheader(img)
+                _object = lickshane.util.readkey3(hdr,'object')
+                _output = _object + '_' + '_'.join(setup) + '_' + img
+                lickshane.util.delete(_output)
+                iraf.ccdproc(img, output= _output , overscan="yes", trim="yes", zerocor='no', flatcor='no',\
+                             darkcor='no', zero='', ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                             biassec=_overscan[tpe][setup[0]], readaxi=_section[tpe], Stdout=1)
+
+                lickshane.util.addMJD(_output)
+                lickshane.util.updateheader(_output, 0, {'GAIN':[_gain0[tpe],'gain '],'RON':[_ron0[tpe],'read out noise ']})
+
+                if tpe in biasmerge:
+                    iraf.ccdproc(_output, output='' , overscan="no", trim="no", zerocor='yes', flatcor='no',\
+                                 darkcor='no', zero=biasmerge[tpe], ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                                 biassec=_overscan[tpe][setup[0]], readaxi=_section[tpe], Stdout=1)                        
+                if flatfile:
+                    iraf.ccdproc(_output, output='' , overscan="no", trim="no", zerocor='no', flatcor='yes',\
+                                 darkcor='no', zero='', ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                                 biassec=_overscan[tpe][setup[0]], flat='n'+flatfile, readaxi=_section[tpe], Stdout=1)
+                objectsetup.append(_output)
+
+########################################################
+            if tpe in arclist:
+
+                setup0 = ''
+                for key in arclist[tpe].keys():
+                    print key,setup
+                    if key == setup:
+                        setup0 = key
+                        print 'arc with same setup found'
+                        break
+                if not setup0:
+                    for key in arclist[tpe].keys():
+                        print key,setup,'##'
+                        if key[0] == setup[0]:
+                            setup0 = key
+                            print 'arc with same grims different slit found'
+                            break
+                if setup0:
+                    for img in arclist[tpe][setup0]:
+                            hdr= pyfits.getheader(img)
+                            _object = lickshane.util.readkey3(hdr,'object')
+                            _output = _object + '_' + '_'.join(setup0) + '_' + img
+                            lickshane.util.delete(_output)
+                            iraf.ccdproc(img, output= _output , overscan="yes", trim="yes", zerocor='no', flatcor='no',\
+                                         darkcor='no', zero='', ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                                         biassec=_overscan[tpe][setup[0]], readaxi='line', Stdout=1)
+
+                            lickshane.util.addMJD(_output)
+                            lickshane.util.updateheader(_output, 0, {'GAIN':[_gain0[tpe],'gain '],'RON':[_ron0[tpe],'read out noise ']})
+
+                            if tpe in biasmerge:
+                                iraf.ccdproc(_output, output='' , overscan="no", trim="no", zerocor='yes', flatcor='no',\
+                                             darkcor='no', zero=biasmerge[tpe], ccdtype='', fixpix='no', illumcor = "no",\
+                                             trimsec=_trimsec[tpe][setup[0]], biassec=_overscan[tpe][setup[0]], readaxi='line', Stdout=1)                        
+                            if flatfile:
+                                iraf.ccdproc(_output, output='' , overscan="no", trim="no", zerocor='no', flatcor='yes',\
+                                             darkcor='no', zero='', ccdtype='', fixpix='no', illumcor = "no", trimsec=_trimsec[tpe][setup[0]],\
+                                             biassec=_overscan[tpe][setup[0]], flat='n'+flatfile, readaxi='line', Stdout=1)
+                            arcsetup.append(_output)
+
+            print objectsetup
+            print arcsetup
+
+
+            for nameout0 in objectsetup:
+                print nameout0
+                arcfile = ''
+                if arcsetup:
+                    arcfile = lickshane.util.searcharc(nameout0, arcsetup)[0]
+                arcref = ''
+                if arcfile:
+                    arcref = lickshane.util.searcharc(nameout0, '')[0]
+
+                if tpe == 'kastb':
+                    iraf.longslit.dispaxi = 1
+                elif tpe == 'kastr':
+                    iraf.longslit.dispaxi = 2
+
+                iraf.set(direc=lickshane.__path__[0] + '/')
+                if arcref:                
+                    print arcref,'here'
+                    os.system('cp ' + arcref + ' .')
+                    arcref = string.split(arcref, '/')[-1]
+                    if not os.path.isdir('database/'):
+                        os.mkdir('database/')
+                    if os.path.isfile(lickshane.util.searcharc(nameout0, '')[1] +
+                                      '/database/id' + re.sub('.fits', '', arcref)):
+                        os.system('cp ' + lickshane.util.searcharc(nameout0, '')[1] +\
+                                      '/database/id' + re.sub('.fits', '', arcref) + ' database/')
+                    if tpe == 'kastb':
+                        yy1 = pyfits.open(arcref)[0].data[150:160].mean(0)
+                        yy2 = pyfits.open(arcfile)[0].data[150:160].mean(0)
+                    elif tpe == 'kastr':
+                        yy1 = pyfits.open(arcref)[0].data[:,150:160].mean(1)
+                        yy2 = pyfits.open(arcfile)[0].data[:,150:160].mean(1)
+
+                    yy1 = yy1 - np.min(yy1)
+                    xx1 = np.arange(len(yy1))
+                    yy2 = yy2 - np.min(yy2)
+                    xx2 = np.arange(len(yy2))
+                    _shift = lickshane.lickshane2Ddef.checkwavelength_arc(xx1, yy1, xx2, yy2, 0, 2050,
+                                                                          inter=False) #* (-1)
+
+
+                    identific = iraf.longslit.reidentify(referenc=arcref, images=arcfile, interac=_inter,
+                                                         section= _section[tpe]+' 10', shift=_shift,
+                                                         coordli='direc$standard/ident/Lines_HgCdHeNeAr600.dat', 
+                                                         overrid='yes', step=0, newaps='no', nsum=5, nlost=2, cradius=10, 
+                                                         mode='h', verbose='yes', Stdout=1)
+                                                        
+                    if _inter:
+                        answ = raw_input(
+                            '### do you like the identification [[y]/n]')
+                        if not answ:
+                            answ = 'y'
+                    else:
+                        answ = 'y'
+                    if answ in ['n', 'N', 'no', 'NO', 'No']:
+
+                        if tpe == 'kastb':
+                            yy1 = pyfits.open(arcref)[0].data[150:160].mean(0)
+                            yy2 = pyfits.open(arcfile)[0].data[150:160].mean(0)
+                        elif tpe == 'kastr':
+                            yy1 = pyfits.open(arcref)[0].data[:,150:160].mean(1)
+                            yy2 = pyfits.open(arcfile)[0].data[:,150:160].mean(1)
+
+                        yy1 = yy1 - np.min(yy1)
+                        xx1 = np.arange(len(yy1))
+                        yy2 = yy2 - np.min(yy2)
+                        xx2 = np.arange(len(yy2))
+                        _shift = lickshane.lickshane2Ddef.checkwavelength_arc(xx1, yy1, xx2, yy2, 0, 2050,
+                                                                              inter=_inter) #* (-1)
+                        raw_input(_shift)
+                        identific = iraf.longslit.reidentify(referenc=arcref, images=arcfile, interac='YES',
+                                                             section= _section[tpe]+' 10', shift=_shift, overrid='yes',
+                                                             step=0,coordli='direc$standard/ident/Lines_HgCdHeNeAr600.dat',
+                                                             newaps='no', nsum=5, nlost=2, cradius=10, mode='h',
+                                                             verbose='yes', Stdout=1)
+                        answ = raw_input('### is it ok now [[y]/n]')
+                        if not answ:
+                            answ = 'y'
+                        if answ in ['n', 'N', 'no', 'NO', 'No']:
+                            sys.exit('warning: line identification with some problems')
+                else:
+                    identific = iraf.longslit.identify(images=arcfile, section= _section[tpe]+' 10', 
+                                                       coordli='direc$standard/ident/Lines_HgCdHeNeAr600.dat',\
+                                                       nsum=10, fwidth=7, order=5, functio='legendre', cradius=10, mode='h', Stdout=0)
+
+                iraf.longslit.reidentify(referenc=arcfile, images=arcfile, interac='NO', section= _section[tpe]+' 10',
+                                         newaps='yes', nsum=5, nlost=2,
+                                         coordli='direc$standard/ident/Lines_HgCdHeNeAr600.dat', overrid='yes',
+                                         step=10, cradius=10, mode='h', verbose='no', Stdout=1)
+
+                qqq = iraf.longslit.fitcoords(images=re.sub('.fits', '', arcfile),
+                                              fitname=re.sub('.fits', '', arcfile), interac='no', combine='yes',
+                                              databas='database',
+                                              function='legendre', yorder=4, logfile='', plotfil='', mode='h')
+
+
+####################################################################
+#                                cosmic 
+##################################################################3
+                lickshane.util.delete('c' + nameout0)
+                lickshane.cosmics.lacos_spec(nameout0, output='c'+nameout0, outmask='mask.fits', gain= _gain, readn= _rdnoise,\
+                                             xorder=9, yorder=3, sigclip=4.5, sigfrac=0.5, objlim=1, 
+                                             niter=2, instrument= tpe, verbose=True, interactive=False)
+                lickshane.util.delete('mask.fits')
+                lickshane.util.delete('tc' + nameout0)
+                iraf.specred.transform(input='c'+nameout0, output='tc' + nameout0, minput='',
+                                       fitnames=re.sub('.fits', '', arcfile), databas='database',
+                                       x1='INDEF', x2='INDEF', y1='INDEF', y2='INDEF', flux='yes',
+                                       logfile='logfile')  # , mode='h')
+###################################################################
+
+                lickshane.util.delete('t' + nameout0)
+                iraf.specred.transform(input=nameout0, output='t' + nameout0, minput='',
+                                       fitnames=re.sub('.fits', '', arcfile), databas='database',
+                                       x1='INDEF', x2='INDEF', y1='INDEF', y2='INDEF', flux='yes',
+                                       logfile='logfile')  # , mode='h')
+
+#               #####################
+                lickshane.util.delete('t' + arcfile)
+                iraf.specred.transform(input=arcfile, output='t' + arcfile, minput='',
+                                       fitnames=re.sub('.fits', '', arcfile), databas='database',
+                                       x1='INDEF', x2='INDEF', y1='INDEF', y2='INDEF', flux='yes',
+                                       logfile='logfile')  # , mode='h')
+
+                #######################  check wavelength calibration #####
+                _skyfile = lickshane.__path__[0] + '/standard/ident/sky_' + setup[0]  + '.fits'
+                if glob.glob(_skyfile) and \
+                        float(lickshane.util.readkey3(lickshane.util.readhdr('t' + nameout0), 'exptime')) > 300.:
+                    shift = lickshane.lickshane2Ddef.skyfrom2d('t' + nameout0, _skyfile, _interactive)
+                    zro = pyfits.open('t' + nameout0)[0].header.get('CRVAL2')
+                    print '\n### check wavelengh calibration, found a shift of ' + str(shift) + ' Angstrom \n'
+                    if _interactive:
+                        answ = raw_input(
+                            '### do you want to correct the wavelengh calibration with this shift: ' + str(
+                                shift) + ' [[y]/n] ? ')
+                        if not answ:
+                            answ = 'y'
+                    else:
+                        answ = 'y'
+                    if answ.lower() in ['y', 'yes']:
+                        lickshane.util.updateheader('t' + nameout0, 0, {'CRVAL2': [zro + int(shift), '']})
+                        lickshane.util.updateheader('t' + nameout0, 0, {'shift': [float(shift), '']})
+
+                        lickshane.util.updateheader('tc' + nameout0, 0, {'CRVAL2': [zro + int(shift), '']})
+                        lickshane.util.updateheader('tc' + nameout0, 0, {'shift': [float(shift), '']})
+
+                else:
+                    print '\n### exposure too short, the sky lines could be not visible \n'
+
+
+
+
+
+
+
+
+
+
+
+
+
+            raw_input('\n#########  go to next setup ')

@@ -41,7 +41,7 @@ setup(
     version=verstr,#'0.1.3',
     author='S. Valenti',
     author_email='stfn.valenti@gmail.com',
-    scripts=['bin/lickspec'],
+    scripts=['bin/lickspec2D','bin/lickspec1D'],
     url='',
     license='LICENSE.txt',
     description='lickshane is a package to reduce lick shane spectra',
@@ -51,6 +51,6 @@ setup(
     package_dir={'':'src'},
     package_data = {'lickshane' : ["standard/MAB/*","standard/ident/*","standard/cat/*","standard/extinction/*",\
                                    "standard/fits/*","standard/sex/*","standard/stdlist/*","standard/flux/*",\
-                                   "archive/blu/*/*fits","archive/red/*/*fits",\
-                                   "archive/red/arc/*fits","archive/red/*/*/id*"]}
+                                   "archive/kastb/arc/*/*fits","archive/kastr/arc/*/*fits",\
+                                   "archive/kastr/arc/*/database/id*","archive/kastb/arc/*/database/id*"]}
 )
